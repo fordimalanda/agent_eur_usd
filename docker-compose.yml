@@ -4,7 +4,7 @@ services:
     image: jsfrnc/mt5-docker-api:latest
     container_name: mt5_terminal_container
     ports:
-      - "3000:3000" # Pour accéder à l'interface de MT5 via le navigateur
+      - "3001:3000" # Pour accéder à l'interface de MT5 via le navigateur
       - "8001:8001" # Port de l'API Python (mt5linux)
     environment:
       - VNC_PASSWORD=${VNC_PASSWORD}
