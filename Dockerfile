@@ -12,5 +12,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # La commande par défaut (sera écrasée par docker-compose)
-# pour lancer notre propre script
 CMD ["python", "main.py"]

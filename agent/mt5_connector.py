@@ -1,67 +1,73 @@
-import MetaTrader5 as mt5
+# agent/mt5_connector.py
 import pandas as pd
 import logging
 import os
 from dotenv import load_dotenv
-from datetime import datetime
+# On importe la version "bridge" de MetaTrader5
+from mt5linux import MetaTrader5 
 
-# Configuration des logs pour voir ce que fait le bot en temps réel
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
-# Chargement des variables d'environnement (.env)
 load_dotenv()
 
 class MT5Connector:
     def __init__(self):
-        self.login = int(os.getenv("MT5_LOGIN"))
-        self.password = os.getenv("MT5_PASSWORD")
-        self.server = os.getenv("MT5_SERVER")
+        # Le nom d'hôte est défini dans docker-compose (mt5-terminal)
+        # Si on tourne en dehors de Docker, on peut utiliser 'localhost'
+        self.host = os.getenv("MT5_HOST", "localhost")
+        self.port = int(os.getenv("MT5_PORT", 8001))
         self.symbol = "EURUSD"
-        self.is_connected = False
+        self.mt5 = None
 
     def connect(self):
-        """Initialise la connexion avec le terminal MetaTrader 5."""
-        if not mt5.initialize(login=self.login, password=self.password, server=self.server):
-            logger.error(f"Échec de la connexion à MT5. Erreur : {mt5.last_error()}")
+        """Initialise la connexion avec le serveur MT5 via mt5linux."""
+        try:
+            logger.info(f"Tentative de connexion à MT5 sur {self.host}:{self.port}...")
+            # Création de l'objet MetaTrader5 de mt5linux
+            self.mt5 = MetaTrader5(host=self.host, port=self.port)
+            
+            # Initialisation de la connexion
+            if not self.mt5.initialize():
+                logger.error(f"Échec de l'initialisation. Erreur : {self.mt5.last_error()}")
+                return False
+            
+            logger.info("Connecté avec succès à l'API MT5.")
+            return True
+        except Exception as e:
+            logger.error(f"Exception lors de la connexion à MT5 : {e}")
             return False
-        
-        self.is_connected = True
-        logger.info(f"Connecté à MT5. Compte : {self.login} sur {self.server}")
-        return True
 
     def disconnect(self):
         """Ferme proprement la connexion."""
-        mt5.shutdown()
-        self.is_connected = False
-        logger.info("Déconnecté de MT5.")
+        if self.mt5:
+            self.mt5.shutdown()
+            logger.info("Déconnecté de l'API MT5.")
 
     def get_account_info(self):
-        """Récupère les informations du compte (solde, équité, marge libre)."""
-        info = mt5.account_info()
+        """Récupère les informations du compte."""
+        if not self.mt5: return None
+        info = self.mt5.account_info()
         if info is None:
             logger.error("Impossible de récupérer les infos du compte.")
             return None
         return info._asdict()
 
-    def get_candles(self, timeframe=mt5.TIMEFRAME_H1, count=100):
+    def get_candles(self, timeframe=16385, count=100): # 16385 = mt5.TIMEFRAME_H1
         """Récupère les dernières bougies pour l'analyse."""
-        rates = mt5.copy_rates_from_pos(self.symbol, timeframe, 0, count)
+        if not self.mt5: return None
+        # Note: Les constantes de timeframe sont disponibles via self.mt5.TIMEFRAME_H1
+        rates = self.mt5.copy_rates_from_pos(self.symbol, timeframe, 0, count)
         if rates is None:
             logger.error(f"Impossible de récupérer les bougies pour {self.symbol}.")
             return None
-        
-        # Conversion en DataFrame Pandas pour faciliter les calculs (RSI, etc.)
         df = pd.DataFrame(rates)
         df['time'] = pd.to_datetime(df['time'], unit='s')
         return df
 
     def get_open_positions(self):
         """Vérifie si le bot a déjà une position ouverte sur l'EUR/USD."""
-        positions = mt5.positions_get(symbol=self.symbol)
+        if not self.mt5: return []
+        positions = self.mt5.positions_get(symbol=self.symbol)
         if positions is None:
             return []
         return positions
@@ -71,29 +77,29 @@ class MT5Connector:
         Ouvre un ordre Buy ou Sell avec Stop Loss et Take Profit.
         action : "BUY" ou "SELL"
         """
-        symbol_info = mt5.symbol_info(self.symbol)
+        if not self.mt5: return False
+        
+        symbol_info = self.mt5.symbol_info(self.symbol)
         if symbol_info is None:
             logger.error(f"Symbole {self.symbol} introuvable.")
             return False
 
-        # S'assurer que le symbole est visible dans la Market Watch
         if not symbol_info.visible:
-            if not mt5.symbol_select(self.symbol, True):
+            if not self.mt5.symbol_select(self.symbol, True):
                 logger.error(f"Impossible d'ajouter {self.symbol} à la Market Watch.")
                 return False
 
         point = symbol_info.point
-        price = mt5.symbol_info_tick(self.symbol)
+        price = self.mt5.symbol_info_tick(self.symbol)
 
-        # Calcul des prix d'entrée, SL et TP
-        # Note: 1 pip sur EURUSD (5 décimales) = 10 points MT5
+        # Le reste de la logique est identique
         if action == "BUY":
-            order_type = mt5.ORDER_TYPE_BUY
+            order_type = self.mt5.ORDER_TYPE_BUY
             price_current = price.ask
             sl = price_current - (sl_pips * 10 * point)
             tp = price_current + (tp_pips * 10 * point)
         elif action == "SELL":
-            order_type = mt5.ORDER_TYPE_SELL
+            order_type = self.mt5.ORDER_TYPE_SELL
             price_current = price.bid
             sl = price_current + (sl_pips * 10 * point)
             tp = price_current - (tp_pips * 10 * point)
@@ -101,46 +107,44 @@ class MT5Connector:
             logger.error("Action invalide. Utilisez 'BUY' ou 'SELL'.")
             return False
 
-        # Création de la requête d'ordre
         request = {
-            "action": mt5.TRADE_ACTION_DEAL,
+            "action": self.mt5.TRADE_ACTION_DEAL,
             "symbol": self.symbol,
             "volume": float(lot_size),
             "type": order_type,
             "price": price_current,
             "sl": float(sl),
             "tp": float(tp),
-            "deviation": 20, # Tolérance de slippage
-            "magic": 202411, # Identifiant unique pour ton bot
+            "deviation": 20,
+            "magic": 202411,
             "comment": "Agent_EUR_USD",
-            "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC, # Force IOC (souvent requis)
+            "type_time": self.mt5.ORDER_TIME_GTC,
+            "type_filling": self.mt5.ORDER_FILLING_IOC,
         }
 
-        # Envoi de l'ordre
-        result = mt5.order_send(request)
+        result = self.mt5.order_send(request)
         
-        if result.retcode != mt5.TRADE_RETCODE_DONE:
+        if result.retcode != self.mt5.TRADE_RETCODE_DONE:
             logger.error(f"Échec de l'ordre {action}. Code: {result.retcode}, Commentaire: {result.comment}")
             return False
         
-        logger.info(f"Ordre {action} exécuté avec succès ! Ticket: {result.order}, Prix: {price_current}")
+        logger.info(f"Ordre {action} exécuté ! Ticket: {result.order}, Prix: {price_current}")
         return result.order
 
     def close_position(self, ticket):
         """Ferme une position spécifique en fonction de son ticket."""
-        positions = mt5.positions_get(ticket=ticket)
+        if not self.mt5: return False
+        positions = self.mt5.positions_get(ticket=ticket)
         if not positions:
             logger.error(f"Position {ticket} introuvable.")
             return False
         
         position = positions[0]
-        # Pour fermer un Buy, on fait un Sell au prix Bid, et inversement
-        order_type = mt5.ORDER_TYPE_SELL if position.type == mt5.POSITION_TYPE_BUY else mt5.ORDER_TYPE_BUY
-        price = mt5.symbol_info_tick(self.symbol).bid if order_type == mt5.ORDER_TYPE_SELL else mt5.symbol_info_tick(self.symbol).ask
+        order_type = self.mt5.ORDER_TYPE_SELL if position.type == self.mt5.POSITION_TYPE_BUY else self.mt5.ORDER_TYPE_BUY
+        price = self.mt5.symbol_info_tick(self.symbol).bid if order_type == self.mt5.ORDER_TYPE_SELL else self.mt5.symbol_info_tick(self.symbol).ask
 
         request = {
-            "action": mt5.TRADE_ACTION_DEAL,
+            "action": self.mt5.TRADE_ACTION_DEAL,
             "symbol": self.symbol,
             "volume": position.volume,
             "type": order_type,
@@ -149,32 +153,29 @@ class MT5Connector:
             "deviation": 20,
             "magic": 202411,
             "comment": "Close_by_Agent",
-            "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
+            "type_time": self.mt5.ORDER_TIME_GTC,
+            "type_filling": self.mt5.ORDER_FILLING_IOC,
         }
 
-        result = mt5.order_send(request)
-        if result.retcode != mt5.TRADE_RETCODE_DONE:
+        result = self.mt5.order_send(request)
+        if result.retcode != self.mt5.TRADE_RETCODE_DONE:
             logger.error(f"Échec de la fermeture de la position {ticket}. Code: {result.retcode}")
             return False
         
         logger.info(f"Position {ticket} fermée avec succès.")
         return True
 
-# --- Bloc de test (s'exécute uniquement si on lance ce fichier directement) ---
+# --- Bloc de test ---
 if __name__ == "__main__":
     bot = MT5Connector()
     if bot.connect():
-        # 1. Test récupération des données
         df = bot.get_candles(count=5)
         print("\n--- 5 Dernières bougies H1 ---")
         print(df[['time', 'open', 'high', 'low', 'close']])
         
-        # 2. Test récupération du compte
         account = bot.get_account_info()
         print(f"\n--- Solde du compte : {account['balance']} {account['currency']} ---")
         
-        # 3. Test des positions ouvertes
         positions = bot.get_open_positions()
         print(f"\nPositions ouvertes sur EURUSD : {len(positions)}")
         

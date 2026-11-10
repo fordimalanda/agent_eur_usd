@@ -1,4 +1,4 @@
-MetaTrader5
+mt5linux
 requests
 python-dotenv
 pandas
