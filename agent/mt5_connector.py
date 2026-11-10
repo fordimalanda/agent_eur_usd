@@ -23,8 +23,9 @@ class MT5Connector:
         """Initialise la connexion avec le serveur MT5 via mt5linux."""
         try:
             logger.info(f"Tentative de connexion à MT5 sur {self.host}:{self.port}...")
-            # Création de l'objet MetaTrader5 de mt5linux
-            self.mt5 = MetaTrader5(host=self.host, port=self.port)
+            
+            # LA MODIFICATION EST ICI : on ajoute engine='remote'
+            self.mt5 = MetaTrader5(host=self.host, port=self.port, engine='remote')
             
             # Initialisation de la connexion
             if not self.mt5.initialize():
