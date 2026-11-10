@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  # Service 1 : Le terminal MetaTrader 5 tournant dans Docker
+  mt5-terminal:
+    image: jsfrnc/mt5-docker-api:latest
+    container_name: mt5_terminal_container
+    ports:
+      - "3000:3000" # Pour accéder à l'interface de MT5 via le navigateur
+      - "8000:8000" # Port de l'API (si besoin plus tard)
+    environment:
+      # On passe les identifiants MT5 à l'image via les variables d'environnement
+      - VNC_PASSWORD=${VNC_PASSWORD}
+      - MT5_LOGIN=${MT5_LOGIN}
+      - MT5_PASSWORD=${MT5_PASSWORD}
+      - MT5_SERVER=${MT5_SERVER}
+    volumes:
+      # Persistance des données de MT5 (pour ne pas perdre la config à chaque redémarrage)
+      - mt5_data:/root/.wine/drive_c/Program Files/MetaTrader 5
+    restart: unless-stopped
+
+  # Service 2 : Ton agent Python
+  agent:
+    build: . # Construit l'image à partir de notre Dockerfile
+    container_name: agent_eur_usd_container
+    depends_on:
+      - mt5-terminal # Ne démarre pas avant que le terminal MT5 soit lancé
+    environment:
+      # On passe les clés API et identifiants à notre script Python
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - MT5_LOGIN=${MT5_LOGIN}
+      - MT5_PASSWORD=${MT5_PASSWORD}
+      - MT5_SERVER=${MT5_SERVER}
+    volumes:
+      # On monte le dossier local dans le conteneur pour pouvoir modifier le code
+      # sans avoir à reconstruire l'image à chaque fois
+      - .:/app
+      - /app/venv # On exclut le venv local
+    # La commande pour lancer notre agent (à adapter quand main.py sera prêt)
+    command: python main.py
+
+volumes:
+  mt5_data:
