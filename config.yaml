@@ -1,0 +1,9 @@
+trading:
+  symbol: "EURUSD"
+  timeframe: "H1"
+  risk_per_trade_percent: 1.0  # Risque max de 1% du capital par trade
+  max_daily_drawdown_percent: 5.0 # Coupe-circuit si -5% dans la journée
+
+ai:
+  model: "deepseek-chat"
+  temperature: 0.2 # Faible température pour des réponses logiques et moins créatives
