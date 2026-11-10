@@ -24,10 +24,9 @@ class MT5Connector:
         try:
             logger.info(f"Tentative de connexion à MT5 sur {self.host}:{self.port}...")
             
-            # LA MODIFICATION EST ICI : on ajoute engine='remote'
-            self.mt5 = MetaTrader5(host=self.host, port=self.port, engine='remote')
+            # On retire engine='remote', on spécifie juste host et port
+            self.mt5 = MetaTrader5(host=self.host, port=self.port)
             
-            # Initialisation de la connexion
             if not self.mt5.initialize():
                 logger.error(f"Échec de l'initialisation. Erreur : {self.mt5.last_error()}")
                 return False

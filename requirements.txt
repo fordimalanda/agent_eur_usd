@@ -1,4 +1,4 @@
-mt5linux
+mt5linux==1.0.11
 requests
 python-dotenv
 pandas
